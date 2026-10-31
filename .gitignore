@@ -1,2 +1,6 @@
 cache/
 downloaded_files/
+.DS_Store
+*.DS_Store
+config.local.json
+

@@ -2,6 +2,16 @@
 
 Reverse-engineering *Flyover* (3D satellite mode) from Apple Maps. Similar work is done for Google Earth [here](https://github.com/retroplasma/earth-reverse-engineering).
 
+> [!NOTE]
+> This repository is a modernized fork of [retroplasma/flyover-reverse-engineering](https://github.com/retroplasma/flyover-reverse-engineering).
+>
+> **Key updates in this fork:**
+> - **Modern macOS & Server Support**: Compatible with newer Apple Maps servers and modern macOS releases (macOS Sonoma, Sequoia, etc.). Bypasses deprecated C3MM style 14 metadata requirements and dynamically resolves manifest URLs.
+> - **HEIC Texture Support**: Added support for textureFormat 13 (HEIC) with automated conversion to JPEG via macOS `sips` for standard texture viewing.
+> - **Smooth Vertex Normals & Shading**: Computes vertex normals (`vn`) and applies smooth shading (`s 1`) in OBJ exports for cleaner 3D rendering in Blender / MeshLab.
+> - **Parallel Downloads**: Multi-threaded concurrent altitude and tile fetching (`dln = 8`) for faster export speeds.
+> - **Go Modules**: Fully standardized with `go.mod` / `go.sum` for modern Go toolchains.
+
 #### Status
 Roughly, these parts have been figured out:
 - bootstrap of manifests
@@ -55,19 +65,19 @@ This repository is structured as follows:
 
 ##### Setup
 
-Install [Go](https://golang.org/) 1.15.x and run:
+Install [Go](https://golang.org/) (1.18+) and clone the repository:
 ```bash
-go get -d github.com/retroplasma/flyover-reverse-engineering/...
-cd "$(go env GOPATH)/src/github.com/retroplasma/flyover-reverse-engineering"
+git clone https://github.com/Naosukii/flyover-reverse-engineering.git
+cd flyover-reverse-engineering
 ```
 
-Then edit [config.json](config.json):
+Then generate or edit [config.json](config.json):
+- on macOS (Sonoma, Sequoia, etc.):
+  - `./scripts/get_config_macos.sh > config.json`
 - automatically (macOS, Linux, WSL):
   - `./scripts/get_config.sh > config.json`
-- faster (macOS Catalina or older):
-  - `./scripts/get_config_macos.sh > config.json`
-- or manually (Catalina or older):
-  - `resourceManifestURL`: from [GEOConfigStore.db/com.apple.GEO.plist](#files-on-macos) or [GeoServices](#files-on-macos) binary
+- or manually:
+  - `resourceManifestURL`: from [GEOConfigStore.db/com.apple.GEO.plist](#files-on-macos) or `ResourceManifest.pbd`
   - `tokenP1`: from [GeoServices](#files-on-macos) binary (function: `GEOURLAuthenticationGenerateURL`)
 
 ##### Command line programs

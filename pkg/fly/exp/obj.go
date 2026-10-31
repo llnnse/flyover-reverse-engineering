@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
+	"os/exec"
 	"path"
 	"runtime/debug"
 
@@ -14,6 +16,26 @@ import (
 )
 
 var transform = true
+
+func writeTexture(outPath string, data []byte) error {
+	if len(data) > 8 && string(data[4:8]) == "ftyp" {
+		if sipsPath, err := exec.LookPath("sips"); err == nil {
+			tmpFile, err := ioutil.TempFile("", "tex-*.heic")
+			if err == nil {
+				tmpName := tmpFile.Name()
+				defer os.Remove(tmpName)
+				if _, err := tmpFile.Write(data); err == nil {
+					tmpFile.Close()
+					cmd := exec.Command(sipsPath, "-s", "format", "jpeg", tmpName, "--out", outPath)
+					if err := cmd.Run(); err == nil {
+						return nil
+					}
+				}
+			}
+		}
+	}
+	return ioutil.WriteFile(outPath, data, 0655)
+}
 
 type Export interface {
 	Next(c3m c3m.C3M, subPfx string) error
@@ -66,7 +88,7 @@ func (e *OBJExport) Next(c3m c3m.C3M, subPfx string) (err error) {
 	dir, fnPfx := e.dir, e.fnPfx
 
 	for i, material := range c3m.Materials {
-		oth.CheckPanic(ioutil.WriteFile(path.Join(dir, fmt.Sprintf("%s%s_%d.jpg", fnPfx, subPfx, i)), material.JPEG, 0655))
+		oth.CheckPanic(writeTexture(path.Join(dir, fmt.Sprintf("%s%s_%d.jpg", fnPfx, subPfx, i)), material.JPEG))
 		nxt := fmt.Sprintf(`
 newmtl mtl_%s_%d
 Kd 1.000 1.000 1.000
@@ -80,7 +102,8 @@ map_Kd %s%s_%d.jpg
 	for i, mesh := range c3m.Meshes {
 		e.objWriter.write(fmt.Sprintf("mtllib %smodel.mtl\n", fnPfx))
 		e.objWriter.write(fmt.Sprintf("o test_%s_%d\n", subPfx, i))
-		for _, vtx := range mesh.Vertices {
+		transformed := make([][3]float64, len(mesh.Vertices))
+		for idx, vtx := range mesh.Vertices {
 			x, y, z := float64(vtx.X), float64(vtx.Y), float64(vtx.Z)
 			if transform {
 				x, y, z =
@@ -91,17 +114,53 @@ map_Kd %s%s_%d.jpg
 				y += c3m.Header.Translation[1]
 				z += c3m.Header.Translation[2]
 			}
-
+			transformed[idx] = [3]float64{x, y, z}
 			e.objWriter.write(fmt.Sprintln("v", x, y, z))
 			e.objWriter.write(fmt.Sprintln("vt", vtx.U, vtx.V))
 		}
 
+		normals := make([][3]float64, len(mesh.Vertices))
+		for _, group := range mesh.Groups {
+			for _, face := range group.Faces {
+				if int(face.A) < len(transformed) && int(face.B) < len(transformed) && int(face.C) < len(transformed) {
+					va := transformed[face.A]
+					vb := transformed[face.B]
+					vc := transformed[face.C]
+					ab := [3]float64{vb[0] - va[0], vb[1] - va[1], vb[2] - va[2]}
+					ac := [3]float64{vc[0] - va[0], vc[1] - va[1], vc[2] - va[2]}
+					fn := [3]float64{
+						ab[1]*ac[2] - ab[2]*ac[1],
+						ab[2]*ac[0] - ab[0]*ac[2],
+						ab[0]*ac[1] - ab[1]*ac[0],
+					}
+					normals[face.A][0] += fn[0]
+					normals[face.A][1] += fn[1]
+					normals[face.A][2] += fn[2]
+					normals[face.B][0] += fn[0]
+					normals[face.B][1] += fn[1]
+					normals[face.B][2] += fn[2]
+					normals[face.C][0] += fn[0]
+					normals[face.C][1] += fn[1]
+					normals[face.C][2] += fn[2]
+				}
+			}
+		}
+		for _, n := range normals {
+			l := math.Sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2])
+			if l > 1e-6 {
+				e.objWriter.write(fmt.Sprintln("vn", n[0]/l, n[1]/l, n[2]/l))
+			} else {
+				e.objWriter.write("vn 0.0 0.0 1.0\n")
+			}
+		}
+
 		for i, group := range mesh.Groups {
 			e.objWriter.write(fmt.Sprintf("g g_%s_%d\n", subPfx, i))
+			e.objWriter.write("s 1\n")
 			e.objWriter.write(fmt.Sprintf("usemtl mtl_%s_%d\n", subPfx, i))
 			for _, face := range group.Faces {
 				a, b, c := int(face.A)+1+e.vtxCount, int(face.B)+1+e.vtxCount, int(face.C)+1+e.vtxCount
-				e.objWriter.write(fmt.Sprintf("f %d/%d %d/%d %d/%d\n", a, a, b, b, c, c))
+				e.objWriter.write(fmt.Sprintf("f %d/%d/%d %d/%d/%d %d/%d/%d\n", a, a, a, b, b, b, c, c, c))
 			}
 		}
 		e.vtxCount += len(mesh.Vertices)

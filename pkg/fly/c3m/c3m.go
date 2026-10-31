@@ -35,7 +35,7 @@ func parse(data []byte) (c3m C3M) {
 	if len(data) < 4 || data[0] != 'C' || data[1] != '3' || data[2] != 'M' {
 		panic("Invalid C3M header")
 	}
-	switch data[4] {
+	switch data[3] {
 	case 0x03:
 		l.Println("C3M v3")
 		c3m = parseC3Mv3(data)
@@ -149,6 +149,10 @@ func parseMaterial(data []byte, offset *int) []Material {
 			switch textureFormat {
 			case 0:
 				l.Printf("Format: JPEG")
+				materials[processedItems].JPEG = data[textureOffset : textureOffset+textureLength2]
+				*offset += 16
+			case 13:
+				l.Printf("Format: HEIC")
 				materials[processedItems].JPEG = data[textureOffset : textureOffset+textureLength2]
 				*offset += 16
 			default:

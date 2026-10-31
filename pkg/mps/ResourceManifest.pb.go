@@ -109,7 +109,13 @@ func (m *ResourceManifest) GetTokenP2() string {
 
 func (m *ResourceManifest) GetCacheBaseUrl() string {
 	if m != nil {
-		return m.CacheBaseUrl
+		if m.CacheBaseUrl != "" {
+			return m.CacheBaseUrl
+		}
+		if url := extractModernResourcesURL(m.XXX_unrecognized); url != "" {
+			return url
+		}
+		return "https://gspe21-ssl.ls.apple.com/"
 	}
 	return ""
 }

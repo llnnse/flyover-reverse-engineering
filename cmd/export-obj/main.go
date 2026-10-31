@@ -128,7 +128,7 @@ func main() {
 	c3m.DisableLogs()
 
 	// semaphore settings
-	dln := 1
+	dln := 8
 	if parallel {
 		dln = 16
 	}
@@ -148,32 +148,44 @@ func main() {
 	// loop over area and altitude
 	for dx := -tryXY; dx <= tryXY; dx++ {
 		for dy := -tryXY; dy <= tryXY; dy++ {
-			for h := 0; h < int(tryH); h++ {
-				xn := x + int(dx)
-				yn := y + int(dy)
-				hasTile, err := ctx.checkTile(p, z, yn, xn, h)
-				if err != nil {
-					panic(err)
-				}
-				if !hasTile {
-					continue
-				}
+			xn := x + int(dx)
+			yn := y + int(dy)
 
-				// async get tile
-				sem <- 1
-				wg.Add(1)
-				dx, dy, h := dx, dy, h
-				go func() {
-					defer wg.Done()
-					tile, err := ctx.getTile(p, z, yn, xn, h)
-					if err != nil {
-						panic(err)
+			hasGround, err := ctx.checkTile(p, z, yn, xn, 0)
+			if err != nil {
+				panic(err)
+			}
+			if !hasGround {
+				continue
+			}
+
+			sem <- 1
+			wg.Add(1)
+			dx, dy := dx, dy
+			go func() {
+				defer wg.Done()
+				defer func() { <-sem }()
+
+				tile, err := ctx.getTile(p, z, yn, xn, 0)
+				if err != nil || len(tile.Meshes) == 0 {
+					return
+				}
+				l.Println("Exporting", dx, dy, "h = 0")
+				ex <- tile
+
+				for h := 1; h < int(tryH); h++ {
+					hasTile, err := ctx.checkTile(p, z, yn, xn, h)
+					if err != nil || !hasTile {
+						break
+					}
+					hTile, err := ctx.getTile(p, z, yn, xn, h)
+					if err != nil || len(hTile.Meshes) == 0 {
+						break
 					}
 					l.Println("Exporting", dx, dy, "h =", h)
-					ex <- tile
-					<-sem
-				}()
-			}
+					ex <- hTile
+				}
+			}()
 		}
 	}
 	wg.Wait() // wait for all tile loads to finish
@@ -188,7 +200,8 @@ func (ctx *context) checkTile(p fly.Trigger, z, y, x, h int) (bool, error) {
 
 	c3mm0, err := ctx.getC3mm(p, 0)
 	if err != nil {
-		return false, err
+		// C3MM style 14 is not available on modern servers; query tiles directly
+		return true, nil
 	}
 
 	smallestZ := c3mm0.RootIndex.SmallestZ
@@ -284,8 +297,8 @@ func (ctx *context) getTile(p fly.Trigger, z, y, x, h int) (c3m.C3M, error) {
 		ctx.URLPrefixC3m, mps.ResourceManifest_StyleConfig_C3M, p.Version, p.Region, x, yn, z, h)
 
 	data, err := ctx.get(url)
-	if err != nil {
-		return c3m.C3M{}, err
+	if err != nil || len(data) == 0 {
+		return c3m.C3M{}, nil
 	}
 	return c3m.Parse(data)
 }
