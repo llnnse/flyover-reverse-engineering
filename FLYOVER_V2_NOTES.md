@@ -106,6 +106,12 @@ f32 × (1+n) quantization steps; n=8 when there are splats, n=0 for empty blocks
 then compressed per-item data (entropy ≈ 7.98 bits/byte; not LZFSE/zstd/LZMA)
 ```
 
+Payload sub-header, seen in all six tiles with splats: a LEB128-style varint (not the payload
+size), then the constant bytes `25 00`, then fields of varying width (they look bit-packed),
+then a recurring marker `80 4a 00 xx 01 xx 06`, a run of zeros containing `24`, and
+`02 00 00 e1`. The high-entropy data starts right after that. The same `80 4a 00` marker
+also appears inside the mesh node, so the mesh and splat streams may share a codec framework.
+
 | Tile | count | bytes | bytes/item |
 |------|-------|-------|------------|
 | 18_44784_104710 (pier) | 18239 | 209651 | 11.5 |
