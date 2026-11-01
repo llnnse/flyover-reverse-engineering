@@ -78,21 +78,48 @@ The working URL is `?style=98&v=758&x=X&y=Y&z=Z&h=H`, with XYZ (top-down) y and 
 metadata octree. Without `h` the server answers HTTP 400. Ten tiles fetched at Santa Monica
 (z=17 and z=18, h=0) range from 3.6 KB (ocean) to 424 KB.
 
-Layout, as far as known:
+Layout: a nested tag–length–value tree with LEB128 varints. It parses exactly to the end of
+the file in all ten sample tiles.
 
 ```
-magic 3d 96 59 2e   u32 version=2   tagged fields (LEB128-style varints?)
-f64[9] rotation matrix + f64[3] ECEF translation (same idea as the C3M header)
-float fields (scale/bounds?), then a high-entropy block: geometry, codec unknown
-3 × embedded HEIF image (ISO-BMFF ftyp…mdat), then 10 trailing bytes:
-  #0 "heic" RGB 8-bit, full resolution (e.g. 736×736): albedo texture atlas
-  #1 "heix" greyscale, half resolution: material map (mask/occlusion-like)
-  #2 "heix" greyscale, half resolution: material map (roughness-like; 204 over water)
+"3d 96 59 2e"  u32 version=2  01 02 00 01  leb128 (≈ size of the splat block + 160)
+node:
+  01 01 01 00 01  leb128 len  header (f64[9] rotation + f64[3] ECEF translation + extras)
+  tag 4  (24 B)   bounding box: f32 center[3], f32 halfSize[3]
+  tag 2           attribute list: 1 byte "00" when empty, else
+                  05 01 01 01 02 01 03 07 01 01 06 01 02 04 01 01  (5 attributes?)
+  tag 3           SPLAT BLOCK (see below)
+  tag 2           child node: textured mesh
+    01 01 01 00 01  leb128 len  header (152 B, transform…)
+    tag 2         mesh geometry, starts "e1 21 66 24", codec unknown
+    tag 3         textures: 3 × HEIF (RGB albedo atlas, 2 half-resolution greyscale material maps)
+  tag 3  (4 B)    01 01 01 00
 ```
 
-The RGB image is a UV texture atlas of recognisable aerial imagery (charts with dilated
-edges), so **R3D is a PBR-textured mesh format, not Gaussian splats**. This matches the
-"PBR Mesh Rendering" debug switch. No splat data has been found in styles 98–100.
+### Splat block (top-level tag 3)
+
+```
+u32 magic 0x07c922d1 ("d1 22 c9 07")  u32 version=1  u64 count  u32 8
+f32 × 9 quantization steps: 0.16 | 0.04 | 0.01 0.01 0.01 | 0.05 0.05 0.05 0.05
+then compressed per-item data (entropy ≈ 7.98 bits/byte; not LZFSE/zstd/LZMA)
+```
+
+| Tile | count | bytes | bytes/item |
+|------|-------|-------|------------|
+| 18_44784_104710 (pier) | 18239 | 209651 | 11.5 |
+| 18_44783_104711 | 4970 | 58061 | 11.7 |
+| 18_44784_104711 | 4337 | 51390 | 11.8 |
+| 17_22391_52355 | 2164 | 26081 | 12.1 |
+| 18_44782_104711 | 808 | 10664 | 13.2 |
+| 18_44783_104710 | 504 | 7197 | 14.3 |
+| ocean tiles | 0 | 24 | – |
+
+The step groups (1, 1, 3, 4) fit Gaussian-splat attributes: a scalar (opacity?), a scalar
+(scale?), RGB colour and a **4-component rotation quaternion**. Positions have no step and are
+probably encoded spatially. About 12 bytes per item is typical of compressed 3DGS. **So R3D is
+a hybrid: a PBR-textured mesh plus a separate Gaussian-splat payload.** This matches the debug
+menu's paired "PBR Mesh Rendering" / "PBR Splat Rendering" switches. The splat codec is unknown
+and is probably implemented in VectorKit.
 
 ## Splat evidence
 
@@ -111,9 +138,9 @@ means VectorKit has a splat renderer for Flyover. It is not confirmed that `R3D`
 ## Next steps
 
 - Port the C3MM v2 parser to Go and let `fetch-v2` take tile and h values from the metadata octree.
-- Decode the R3D geometry block. The codec is unknown, so this likely needs VectorKit.
-- Splats: the "PBR Splat Rendering" path in VectorKit may use a style not yet in the manifest,
-  or build splats on the device. Look for it in VectorKit.
+- Decode the splat block (magic 0x07c922d1) and the mesh block (0x246621e1). Both codecs are
+  unknown and are probably implemented in VectorKit (macOS 27.2 dyld shared cache).
+- No style in the 0–119 enum is splat-specific (103–119 are UNUSED), so splats only come in R3D.
 
 - The R3D decoder and the splat renderer live in VectorKit/GeoServices, not in Maps.app. Extract
   them from the macOS 27.2 dyld shared cache, then look for `R3D` parsing and the code behind
