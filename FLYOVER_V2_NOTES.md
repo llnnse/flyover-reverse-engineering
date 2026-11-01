@@ -99,8 +99,10 @@ node:
 ### Splat block (top-level tag 3)
 
 ```
-u32 magic 0x07c922d1 ("d1 22 c9 07")  u32 version=1  u64 count  u32 8
-f32 × 9 quantization steps: 0.16 | 0.04 | 0.01 0.01 0.01 | 0.05 0.05 0.05 0.05
+u32 magic 0x07c922d1 ("d1 22 c9 07")  u32 version=1  u64 count  u32 n
+f32 × (1+n) quantization steps; n=8 when there are splats, n=0 for empty blocks:
+  0.16 | 0.04 | 0.01 0.01 0.01 | 0.05 0.05 0.05 0.05
+  the first step halves with each zoom level (0.32 at z17, 0.16 at z18): position grid step in meters
 then compressed per-item data (entropy ≈ 7.98 bits/byte; not LZFSE/zstd/LZMA)
 ```
 
@@ -134,6 +136,9 @@ means VectorKit has a splat renderer for Flyover. It is not confirmed that `R3D`
   their `MinZ` and scale to deeper zooms.
 - `cmd/fetch-v2` downloads raw tiles for styles 98–100 using that version and the existing URL
   signing, and logs each response's status, content type, size and first 16 bytes to `index.tsv`.
+
+`pkg/fly/r3d` parses the container, and `cmd/extract-r3d` writes the raw splat block, mesh block,
+textures and a `meta.json` per tile.
 
 ## Next steps
 

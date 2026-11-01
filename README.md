@@ -125,6 +125,14 @@ go run ./cmd/fetch-v2 34.007603 -118.499741 18 1
 ```
 Output goes to `./downloaded_files/v2/<style>_<name>/` as `z_x_y.bin`, plus an `index.tsv` with status, content type, size and first bytes of each request (unsigned URLs only).
 
+###### Extract R3D payloads (experimental) [<sup>[code]</sup>](./cmd/extract-r3d/main.go)
+Pulls the raw payloads out of R3D tiles (style 98) fetched with `fetch-v2`: the Gaussian-splat block (`splats.bin`), the mesh geometry block (`mesh.bin`) and the HEIF textures (`texture_N.heic`), all unmodified, plus a `meta.json` with the tile transform, bounding box, splat count and quantization steps. The splat and mesh codecs are not decoded yet.
+```
+go run ./cmd/extract-r3d [--out dir] [--splats-only] path ...
+go run ./cmd/extract-r3d downloaded_files/v2/98_r3d
+```
+Output goes to `./downloaded_files/r3d_extracted/<tile>/`.
+
 ###### Authenticate URL [<sup>[code]</sup>](./cmd/auth/main.go)
 This authenticates a URL using parameters from `config.json`:
 ```
