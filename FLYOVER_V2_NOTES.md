@@ -143,6 +143,23 @@ means VectorKit has a splat renderer for Flyover. It is not confirmed that `R3D`
 - `cmd/fetch-v2` downloads raw tiles for styles 98–100 using that version and the existing URL
   signing, and logs each response's status, content type, size and first 16 bytes to `index.tsv`.
 
+### What the splats are used for (Central Park vs. Santa Monica, z18, 3×3 tiles each)
+
+| Area | tiles with splats | splats | splats/tile | mesh bytes |
+|------|-------------------|--------|-------------|------------|
+| Central Park (40.7812, −73.9665) | 9/9 | 118236 | 13137 | 57841 |
+| Santa Monica Pier (34.0076, −118.4997) | 5/9 (4 are ocean) | 28858 | 3206 | 91823 |
+
+- Bytes per splat are about 12 in every tile, so the codec rate is stable.
+- Within Central Park, a mostly wooded tile (18_77210_98494) has 23291 splats, while the
+  ballfields tile next to it (18_77211_98494, open lawn with trees at the edges) has 2840.
+  Park meshes are tiny (2–13 KB), so trees are carried by splats, not by the mesh.
+- The pier tile (18_44784_104710) has almost no trees but 18239 splats: it holds the amusement
+  park (Ferris wheel, roller coaster, rides). So splats also cover thin open structures.
+- In short: the mesh carries ground and buildings, and splats carry vegetation and fine
+  structures. A rough colour-based canopy estimate correlates only moderately with splat count
+  (Spearman 0.66), because grass and water confuse it.
+
 `pkg/fly/r3d` parses the container and extracts the raw splat block, mesh block, textures and a
 `meta.json` per tile. `cmd/fetch-v2` does this for each R3D tile it downloads (adding `h=0`), and
 `cmd/extract-r3d` does it for tiles already on disk.
