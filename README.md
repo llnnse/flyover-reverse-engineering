@@ -118,15 +118,15 @@ In Blender (compatible tutorial [here](https://github.com/retroplasma/earth-reve
 
 
 ###### Fetch Flyover V2 tiles (experimental) [<sup>[code]</sup>](./cmd/fetch-v2/main.go)
-Downloads raw tiles of the newer Flyover V2 styles (98 R3D, 99 DSM, 100 metadata) around a location and saves them unmodified for format analysis. Version and tile ranges come from the resource manifest. The URL scheme (`?style=&v=&x=&y=&z=`) is a guess; use `--query` to try extra parameters. See [FLYOVER_V2_NOTES.md](FLYOVER_V2_NOTES.md).
+Downloads raw tiles of the newer Flyover V2 styles (98 R3D, 99 DSM, 100 metadata) around a location and saves them unmodified. Version and tile ranges come from the resource manifest. R3D tiles get `h=0` automatically (override with `--query h=N`) and are extracted right away into splat block, mesh block, HEIF textures and `meta.json` (disable with `--extract=false`). See [FLYOVER_V2_NOTES.md](FLYOVER_V2_NOTES.md).
 ```
-go run ./cmd/fetch-v2 [--styles=98,99,100] [--query=k=v] [--version=N] lat lon zoom [radius]
-go run ./cmd/fetch-v2 34.007603 -118.499741 18 1
+go run ./cmd/fetch-v2 [--styles=98,99,100] [--query=k=v] [--version=N] [--extract=false] lat lon zoom [radius]
+go run ./cmd/fetch-v2 --styles=98 40.7812 -73.9665 18 1
 ```
-Output goes to `./downloaded_files/v2/<style>_<name>/` as `z_x_y.bin`, plus an `index.tsv` with status, content type, size and first bytes of each request (unsigned URLs only).
+Raw tiles go to `./downloaded_files/v2/<style>_<name>/` as `z_x_y.bin`, with an `index.tsv` listing status, content type, size and first bytes of each request (unsigned URLs only). Extracted R3D payloads go to `./downloaded_files/v2/98_r3d_extracted/<tile>/`.
 
 ###### Extract R3D payloads (experimental) [<sup>[code]</sup>](./cmd/extract-r3d/main.go)
-Pulls the raw payloads out of R3D tiles (style 98) fetched with `fetch-v2`: the Gaussian-splat block (`splats.bin`), the mesh geometry block (`mesh.bin`) and the HEIF textures (`texture_N.heic`), all unmodified, plus a `meta.json` with the tile transform, bounding box, splat count and quantization steps. The splat and mesh codecs are not decoded yet.
+For R3D tiles already on disk (`fetch-v2` extracts new downloads itself). Pulls the raw payloads out of R3D tiles (style 98): the Gaussian-splat block (`splats.bin`), the mesh geometry block (`mesh.bin`) and the HEIF textures (`texture_N.heic`), all unmodified, plus a `meta.json` with the tile transform, bounding box, splat count and quantization steps. The splat and mesh codecs are not decoded yet.
 ```
 go run ./cmd/extract-r3d [--out dir] [--splats-only] path ...
 go run ./cmd/extract-r3d downloaded_files/v2/98_r3d

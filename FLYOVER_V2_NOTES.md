@@ -143,8 +143,9 @@ means VectorKit has a splat renderer for Flyover. It is not confirmed that `R3D`
 - `cmd/fetch-v2` downloads raw tiles for styles 98–100 using that version and the existing URL
   signing, and logs each response's status, content type, size and first 16 bytes to `index.tsv`.
 
-`pkg/fly/r3d` parses the container, and `cmd/extract-r3d` writes the raw splat block, mesh block,
-textures and a `meta.json` per tile.
+`pkg/fly/r3d` parses the container and extracts the raw splat block, mesh block, textures and a
+`meta.json` per tile. `cmd/fetch-v2` does this for each R3D tile it downloads (adding `h=0`), and
+`cmd/extract-r3d` does it for tiles already on disk.
 
 ## Next steps
 

@@ -36,3 +36,22 @@ func TestMagic(t *testing.T) {
 		t.Errorf("magic(nil) = %q", got)
 	}
 }
+
+func TestQueryFor(t *testing.T) {
+	for _, c := range []struct {
+		style       mps.ResourceManifest_StyleConfig_StyleID
+		query, want string
+	}{
+		{mps.StyleFlyoverV2R3D, "", "h=0"},
+		{mps.StyleFlyoverV2R3D, "h=1", "h=1"},
+		{mps.StyleFlyoverV2R3D, "&foo=2", "foo=2&h=0"},
+		{mps.StyleFlyoverV2R3D, "foo=2&h=3", "foo=2&h=3"},
+		{mps.StyleFlyoverV2R3D, "hx=1", "hx=1&h=0"},
+		{mps.StyleFlyoverV2DSM, "", ""},
+		{mps.StyleFlyoverV2Metadata, "foo=1", "foo=1"},
+	} {
+		if got := queryFor(c.style, c.query); got != c.want {
+			t.Errorf("queryFor(%d, %q) = %q, want %q", c.style, c.query, got, c.want)
+		}
+	}
+}

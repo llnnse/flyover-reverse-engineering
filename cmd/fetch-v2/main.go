@@ -1,9 +1,10 @@
 // fetch-v2 downloads raw Flyover V2 tiles (styles 98 R3D, 99 DSM, 100 metadata)
 // around a location and saves them unmodified for format analysis.
 //
-// The URL scheme is a guess: ?style=S&v=V&x=X&y=Y&z=Z, with the version and
-// tile ranges taken from the resource manifest. Extra query parameters can be
-// added with --query to try variants.
+// URLs are ?style=S&v=V&x=X&y=Y&z=Z, with the version and tile ranges taken
+// from the resource manifest. R3D tiles also need h (height index); h=0 is
+// added unless --query sets it. Downloaded R3D tiles are extracted right away
+// (splat block, mesh block, textures, meta.json), like cmd/extract-r3d.
 package main
 
 import (
@@ -19,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/retroplasma/flyover-reverse-engineering/pkg/fly/r3d"
 	"github.com/retroplasma/flyover-reverse-engineering/pkg/mps"
 	"github.com/retroplasma/flyover-reverse-engineering/pkg/mps/config"
 	"github.com/retroplasma/flyover-reverse-engineering/pkg/mth"
@@ -41,15 +43,16 @@ func usage() {
 	l.Println()
 	flag.PrintDefaults()
 	l.Println()
-	l.Println("Example:", os.Args[0], "34.007603 -118.499741 18 1")
+	l.Println("Example:", os.Args[0], "--styles=98 34.007603 -118.499741 18 1")
 	os.Exit(1)
 }
 
 func main() {
 	stylesFlag := flag.String("styles", "98,99,100", "comma-separated style IDs")
-	queryFlag := flag.String("query", "", "extra query parameters appended to each URL, e.g. 'h=0'")
+	queryFlag := flag.String("query", "", "extra query parameters appended to each URL, e.g. 'h=1'")
 	versionFlag := flag.Int("version", 0, "override the version from the resource manifest")
 	outFlag := flag.String("out", "./downloaded_files/v2", "output directory")
+	extractFlag := flag.Bool("extract", true, "extract splats, mesh and textures from downloaded R3D tiles")
 	flag.Usage = usage
 	flag.Parse()
 	args := flag.Args()
@@ -87,9 +90,14 @@ func main() {
 	ctx, err := mps.Init(cache, cfg)
 	check(err)
 
+	opts := options{version: *versionFlag, query: *queryFlag, out: *outFlag, extract: *extractFlag}
 	failures := 0
+	var sum summary
 	for _, style := range styles {
-		failures += fetchStyle(ctx, style, lat, lon, zoom, radius, *versionFlag, *queryFlag, *outFlag)
+		failures += fetchStyle(ctx, style, lat, lon, zoom, radius, opts, &sum)
+	}
+	if sum.tiles > 0 {
+		l.Printf("R3D: %d tile(s) extracted, %d with splats (%d splats total) -> %s", sum.tiles, sum.withSplats, sum.splats, filepath.Join(opts.out, "98_r3d_extracted"))
 	}
 	if failures > 0 {
 		l.Println(failures, "request(s) failed")
@@ -97,8 +105,39 @@ func main() {
 	}
 }
 
+type options struct {
+	version int
+	query   string
+	out     string
+	extract bool
+}
+
+type summary struct {
+	tiles, withSplats int
+	splats            uint64
+}
+
+// queryFor returns the extra query parameters for a style: R3D tiles need h,
+// so h=0 is added unless the user set it
+func queryFor(style mps.ResourceManifest_StyleConfig_StyleID, query string) string {
+	query = strings.TrimPrefix(query, "&")
+	if style != mps.StyleFlyoverV2R3D {
+		return query
+	}
+	for _, kv := range strings.Split(query, "&") {
+		if strings.HasPrefix(kv, "h=") {
+			return query
+		}
+	}
+	if query == "" {
+		return "h=0"
+	}
+	return query + "&h=0"
+}
+
 // fetchStyle downloads the tiles of one style and returns the number of failures
-func fetchStyle(ctx mps.Context, style mps.ResourceManifest_StyleConfig_StyleID, lat, lon float64, zoom, radius, version int, query, out string) (failures int) {
+func fetchStyle(ctx mps.Context, style mps.ResourceManifest_StyleConfig_StyleID, lat, lon float64, zoom, radius int, opts options, sum *summary) (failures int) {
+	version, query, out := opts.version, queryFor(style, opts.query), opts.out
 	name := styleNames[style]
 	if name == "" {
 		name = "unknown"
@@ -146,7 +185,7 @@ func fetchStyle(ctx mps.Context, style mps.ResourceManifest_StyleConfig_StyleID,
 			}
 			url := fmt.Sprintf("%s%sstyle=%d&v=%d&x=%d&y=%d&z=%d", sc.UrlPrefix_1, sep, style, sv.Version, x, y, z)
 			if query != "" {
-				url += "&" + strings.TrimPrefix(query, "&")
+				url += "&" + query
 			}
 			data, ctype, err := fetch(ctx, url)
 			status := "200"
@@ -168,9 +207,24 @@ func fetchStyle(ctx mps.Context, style mps.ResourceManifest_StyleConfig_StyleID,
 				failures++
 				l.Printf("  z=%d x=%d y=%d: %v", z, x, y, err)
 			default:
-				fn := filepath.Join(dir, fmt.Sprintf("%d_%d_%d.bin", z, x, y))
+				name := fmt.Sprintf("%d_%d_%d", z, x, y)
+				fn := filepath.Join(dir, name+".bin")
 				check(ioutil.WriteFile(fn, data, 0644))
 				l.Printf("  z=%d x=%d y=%d: %d bytes, %s, magic %s -> %s", z, x, y, len(data), ctype, magic(data), fn)
+				if opts.extract && style == mps.StyleFlyoverV2R3D {
+					res, err := r3d.Extract(data, fn, filepath.Join(out, "98_r3d_extracted", name), false)
+					if err != nil {
+						failures++
+						l.Printf("    extract: %v", err)
+						continue
+					}
+					l.Printf("    extracted: %v", res)
+					sum.tiles++
+					if res.Splats > 0 {
+						sum.withSplats++
+						sum.splats += res.Splats
+					}
+				}
 			}
 		}
 	}
