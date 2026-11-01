@@ -72,6 +72,28 @@ Section types, in file order:
 So R3D tiles appear to be addressed as (z, x, y, h), like v1 C3M. The missing `h` is the
 likely cause of the HTTP 400.
 
+## R3D tiles (style 98)
+
+The working URL is `?style=98&v=758&x=X&y=Y&z=Z&h=H`, with XYZ (top-down) y and `h` from the
+metadata octree. Without `h` the server answers HTTP 400. Ten tiles fetched at Santa Monica
+(z=17 and z=18, h=0) range from 3.6 KB (ocean) to 424 KB.
+
+Layout, as far as known:
+
+```
+magic 3d 96 59 2e   u32 version=2   tagged fields (LEB128-style varints?)
+f64[9] rotation matrix + f64[3] ECEF translation (same idea as the C3M header)
+float fields (scale/bounds?), then a high-entropy block: geometry, codec unknown
+3 × embedded HEIF image (ISO-BMFF ftyp…mdat), then 10 trailing bytes:
+  #0 "heic" RGB 8-bit, full resolution (e.g. 736×736): albedo texture atlas
+  #1 "heix" greyscale, half resolution: material map (mask/occlusion-like)
+  #2 "heix" greyscale, half resolution: material map (roughness-like; 204 over water)
+```
+
+The RGB image is a UV texture atlas of recognisable aerial imagery (charts with dilated
+edges), so **R3D is a PBR-textured mesh format, not Gaussian splats**. This matches the
+"PBR Mesh Rendering" debug switch. No splat data has been found in styles 98–100.
+
 ## Splat evidence
 
 The Maps.app debug menu has a "Flyover Rendering" section containing `Bindless Mesh Rendering`,
@@ -88,10 +110,10 @@ means VectorKit has a splat renderer for Flyover. It is not confirmed that `R3D`
 
 ## Next steps
 
-- Retry R3D with `h` (all zoom-18 tiles at the Santa Monica test spot have h=0):
-  `go run ./cmd/fetch-v2 --styles=98 --query h=0 34.007603 -118.499741 18 1`
-- Once the URL is confirmed, port the C3MM v2 parser to Go and let `fetch-v2` take tile and h
-  values from the metadata octree.
+- Port the C3MM v2 parser to Go and let `fetch-v2` take tile and h values from the metadata octree.
+- Decode the R3D geometry block. The codec is unknown, so this likely needs VectorKit.
+- Splats: the "PBR Splat Rendering" path in VectorKit may use a style not yet in the manifest,
+  or build splats on the device. Look for it in VectorKit.
 
 - The R3D decoder and the splat renderer live in VectorKit/GeoServices, not in Maps.app. Extract
   them from the macOS 27.2 dyld shared cache, then look for `R3D` parsing and the code behind
