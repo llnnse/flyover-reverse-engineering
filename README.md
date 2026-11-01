@@ -3,14 +3,16 @@
 Reverse-engineering *Flyover* (3D satellite mode) from Apple Maps. Similar work is done for Google Earth [here](https://github.com/retroplasma/earth-reverse-engineering).
 
 > [!NOTE]
-> This repository is a modernized fork of [retroplasma/flyover-reverse-engineering](https://github.com/retroplasma/flyover-reverse-engineering).
+> This repository is a modernized fork of [retroplasma/flyover-reverse-engineering](https://github.com/retroplasma/flyover-reverse-engineering), building on [Naosukii's fork](https://github.com/Naosukii/flyover-reverse-engineering).
 >
 > **Key updates in this fork:**
 > - **Modern macOS & Server Support**: Compatible with newer Apple Maps servers and modern macOS releases (macOS Sonoma, Sequoia, etc.). Bypasses deprecated C3MM style 14 metadata requirements and dynamically resolves manifest URLs.
-> - **HEIC Texture Support**: Added support for textureFormat 13 (HEIC) with automated conversion to JPEG via macOS `sips` for standard texture viewing.
+> - **HEIC Texture Support**: Supports textureFormat 13 (HEIC). Textures are saved exactly as received (`.heic` or `.jpg`) and referenced from the `.mtl`, with no re-encoding.
 > - **Smooth Vertex Normals & Shading**: Computes vertex normals (`vn`) and applies smooth shading (`s 1`) in OBJ exports for cleaner 3D rendering in Blender / MeshLab.
 > - **Parallel Downloads**: Multi-threaded concurrent altitude and tile fetching (`dln = 8`) for faster export speeds.
-> - **Go Modules**: Fully standardized with `go.mod` / `go.sum` for modern Go toolchains.
+> - **Go Modules**: Dependencies come from `go.mod` / `go.sum`; no submodules or vendoring needed. Builds on macOS (Apple Silicon and Intel) and Linux.
+> - **Error Handling**: Missing tiles are skipped. Rejected authentication aborts with a message. Other failed requests are reported and make the exporter exit non-zero.
+> - **Flyover V2 Research**: See [FLYOVER_V2_NOTES.md](FLYOVER_V2_NOTES.md) for the newer tile styles (98–100) that Apple Maps serves to current clients.
 
 #### Status
 Roughly, these parts have been figured out:
@@ -65,16 +67,16 @@ This repository is structured as follows:
 
 ##### Setup
 
-Install [Go](https://golang.org/) (1.18+) and clone the repository:
+Install [Go](https://golang.org/) (1.21+) and clone the repository:
 ```bash
-git clone https://github.com/Naosukii/flyover-reverse-engineering.git
+git clone https://github.com/llnnse/flyover-reverse-engineering.git
 cd flyover-reverse-engineering
 ```
 
 Then generate or edit [config.json](config.json):
 - on macOS (Sonoma, Sequoia, etc.):
   - `./scripts/get_config_macos.sh > config.json`
-- automatically (macOS, Linux, WSL):
+- automatically (macOS, Linux, WSL; needs `7z`, `cpio`, `strings`; downloads ~2 GB from Apple):
   - `./scripts/get_config.sh > config.json`
 - or manually:
   - `resourceManifestURL`: from [GEOConfigStore.db/com.apple.GEO.plist](#files-on-macos) or `ResourceManifest.pbd`
@@ -107,6 +109,8 @@ Optional: Center-scale OBJ using node.js script:
 ```
 node scripts/center_scale_obj.js
 ```
+
+Textures are saved as received, so newer tiles produce `.heic` files. If a tool can't read HEIC, convert copies on macOS with `sips -s format jpeg in.heic --out out.jpg` and update the `.mtl`.
 
 In Blender (compatible tutorial [here](https://github.com/retroplasma/earth-reverse-engineering/blob/1dd24a723513d7e96f249e2c635416d4596992c4/BLENDER.md)):
 

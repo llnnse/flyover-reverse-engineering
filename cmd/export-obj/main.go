@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/retroplasma/flyover-reverse-engineering/pkg/fly"
 	"github.com/retroplasma/flyover-reverse-engineering/pkg/fly/c3m"
@@ -121,9 +122,6 @@ func main() {
 	xp := 0
 	export, err := exp.New(exportDir, "exp_")
 	oth.CheckPanic(err)
-	defer func() {
-		oth.CheckPanic(export.Close())
-	}()
 
 	c3m.DisableLogs()
 
@@ -145,6 +143,16 @@ func main() {
 		exDone <- 1
 	}()
 
+	// report logs a failed request; rejected authentication aborts the export
+	var failures int32
+	report := func(err error) {
+		if web.IsAuthError(err) {
+			l.Fatalln("Authentication rejected by server (", err, "). Regenerate config.json.")
+		}
+		atomic.AddInt32(&failures, 1)
+		l.Println("Error:", err)
+	}
+
 	// loop over area and altitude
 	for dx := -tryXY; dx <= tryXY; dx++ {
 		for dy := -tryXY; dy <= tryXY; dy++ {
@@ -153,7 +161,8 @@ func main() {
 
 			hasGround, err := ctx.checkTile(p, z, yn, xn, 0)
 			if err != nil {
-				panic(err)
+				report(err)
+				continue
 			}
 			if !hasGround {
 				continue
@@ -167,7 +176,11 @@ func main() {
 				defer func() { <-sem }()
 
 				tile, err := ctx.getTile(p, z, yn, xn, 0)
-				if err != nil || len(tile.Meshes) == 0 {
+				if err != nil {
+					report(err)
+					return
+				}
+				if len(tile.Meshes) == 0 {
 					return
 				}
 				l.Println("Exporting", dx, dy, "h = 0")
@@ -175,11 +188,19 @@ func main() {
 
 				for h := 1; h < int(tryH); h++ {
 					hasTile, err := ctx.checkTile(p, z, yn, xn, h)
-					if err != nil || !hasTile {
+					if err != nil {
+						report(err)
+						break
+					}
+					if !hasTile {
 						break
 					}
 					hTile, err := ctx.getTile(p, z, yn, xn, h)
-					if err != nil || len(hTile.Meshes) == 0 {
+					if err != nil {
+						report(err)
+						break
+					}
+					if len(hTile.Meshes) == 0 {
 						break
 					}
 					l.Println("Exporting", dx, dy, "h =", h)
@@ -191,7 +212,12 @@ func main() {
 	wg.Wait() // wait for all tile loads to finish
 	close(ex) // no more tiles sent to exporter
 	<-exDone  // wait till all tiles are exported
+	oth.CheckPanic(export.Close())
 	l.Println(xp, "exported")
+	if n := atomic.LoadInt32(&failures); n > 0 {
+		l.Println(n, "request(s) failed; the export is incomplete")
+		os.Exit(1)
+	}
 }
 
 func (ctx *context) checkTile(p fly.Trigger, z, y, x, h int) (bool, error) {
@@ -199,9 +225,12 @@ func (ctx *context) checkTile(p fly.Trigger, z, y, x, h int) (bool, error) {
 	tile := c3mm.Tile{Z: z, Y: y, X: x, H: h}
 
 	c3mm0, err := ctx.getC3mm(p, 0)
-	if err != nil {
-		// C3MM style 14 is not available on modern servers; query tiles directly
+	if errors.Is(err, errC3mmUnavailable) {
+		// no usable C3MM (style 14) metadata; probe tiles directly
 		return true, nil
+	}
+	if err != nil {
+		return false, err
 	}
 
 	smallestZ := c3mm0.RootIndex.SmallestZ
@@ -297,16 +326,38 @@ func (ctx *context) getTile(p fly.Trigger, z, y, x, h int) (c3m.C3M, error) {
 		ctx.URLPrefixC3m, mps.ResourceManifest_StyleConfig_C3M, p.Version, p.Region, x, yn, z, h)
 
 	data, err := ctx.get(url)
-	if err != nil || len(data) == 0 {
+	if isMissing(err) || (err == nil && len(data) == 0) {
 		return c3m.C3M{}, nil
 	}
-	return c3m.Parse(data)
+	if err != nil {
+		return c3m.C3M{}, fmt.Errorf("tile z=%d x=%d y=%d h=%d: %w", z, x, y, h, err)
+	}
+	tile, err := c3m.Parse(data)
+	if err != nil {
+		return c3m.C3M{}, fmt.Errorf("parse tile z=%d x=%d y=%d h=%d: %w", z, x, y, h, err)
+	}
+	return tile, nil
 }
 
+var errC3mmUnavailable = errors.New("c3mm metadata unavailable")
+
+// getC3mm returns a C3MM part. If part 0 can't be fetched or parsed for a reason
+// other than a network, auth or server error, it returns errC3mmUnavailable and
+// remembers that, so tiles are probed directly without asking again.
 func (ctx *context) getC3mm(p fly.Trigger, part int) (c3mm.C3MM, error) {
+	ctx.mu.Lock()
+	defer ctx.mu.Unlock()
+	if ctx.c3mmUnavailable {
+		return c3mm.C3MM{}, errC3mmUnavailable
+	}
 	if ctx.C3mms == nil || ctx.C3mms[part] == nil {
 		data, err := ctx._getC3mm(p, part)
 		if err != nil {
+			if part == 0 && c3mmMissing(err) {
+				ctx.c3mmUnavailable = true
+				l.Println("C3MM metadata unavailable (", err, "); probing tiles directly")
+				return c3mm.C3MM{}, errC3mmUnavailable
+			}
 			return c3mm.C3MM{}, err
 		}
 		if part == 0 {
@@ -325,20 +376,44 @@ func (ctx *context) _getC3mm(p fly.Trigger, part int) (c3mm.C3MM, error) {
 		return c3mm.C3MM{}, err
 	}
 	if err == nil {
-		return c3mm.Parse(file, part)
+		return parseC3mm(file, part)
 	}
 	data, err := ctx.get(fmt.Sprintf("%s?style=%d&v=%d&part=%d&region=%d",
 		ctx.URLPrefixC3mm, mps.ResourceManifest_StyleConfig_C3MM_1, p.Version, part, p.Region))
 	if err != nil {
 		return c3mm.C3MM{}, err
 	}
-	if ioutil.WriteFile(fn+".tmp", data, 0655) != nil {
+	if err = ioutil.WriteFile(fn+".tmp", data, 0655); err != nil {
 		return c3mm.C3MM{}, err
 	}
-	if os.Rename(fn+".tmp", fn) != nil {
+	if err = os.Rename(fn+".tmp", fn); err != nil {
 		return c3mm.C3MM{}, err
 	}
-	return c3mm.Parse(data, part)
+	return parseC3mm(data, part)
+}
+
+type c3mmParseError struct{ err error }
+
+func (e c3mmParseError) Error() string { return "parse c3mm: " + e.err.Error() }
+func (e c3mmParseError) Unwrap() error { return e.err }
+
+func parseC3mm(data []byte, part int) (c3mm.C3MM, error) {
+	m, err := c3mm.Parse(data, part)
+	if err != nil {
+		return c3mm.C3MM{}, c3mmParseError{err}
+	}
+	return m, nil
+}
+
+// c3mmMissing reports whether a C3MM error means the metadata isn't served
+// (or is in an unknown format) rather than a transient or auth failure
+func c3mmMissing(err error) bool {
+	var pe c3mmParseError
+	if isMissing(err) || errors.As(err, &pe) {
+		return true
+	}
+	var se web.StatusError
+	return errors.As(err, &se) && !web.IsAuthError(err) && se.Code < 500
 }
 
 func (ctx context) findPlace(lat, lon float64) (fly.Trigger, error) {
@@ -366,12 +441,19 @@ func (ctx context) get(url string) ([]byte, error) {
 	return get(authURL)
 }
 
+// errNoData is returned when the server sends a jpeg instead of c3m(m) data,
+// which it sometimes does when there is nothing at the requested location
+var errNoData = errors.New("received jpeg instead of data")
+
+// isMissing reports whether err means the requested resource doesn't exist
+func isMissing(err error) bool {
+	return web.IsNotFound(err) || errors.Is(err, errNoData)
+}
+
 func get(url string) (data []byte, err error) {
-	jpgErr := errors.New("received jpeg")
 	data, err = web.GetWithCheck(url, func(res *http.Response) (err error) {
-		// fail early if there's a jpeg, which is sometimes sent if there's no c3m(m)
 		if res.Header.Get("content-type") == "image/jpeg" {
-			err = jpgErr
+			err = errNoData
 		}
 		return
 	})
@@ -384,6 +466,9 @@ type context struct {
 	URLPrefixC3mm    string
 	URLPrefixC3m     string
 	C3mms            []*c3mm.C3MM
+
+	mu              *sync.Mutex
+	c3mmUnavailable bool
 }
 
 func getContext(cache mps.Cache, config config.Config) (m context, err error) {
@@ -405,6 +490,6 @@ func getContext(cache mps.Cache, config config.Config) (m context, err error) {
 		return
 	}
 
-	m = context{ctx, am, c3mmURLPrefix, c3mURLPrefix, nil}
+	m = context{Context: ctx, AltitudeManifest: am, URLPrefixC3mm: c3mmURLPrefix, URLPrefixC3m: c3mURLPrefix, mu: &sync.Mutex{}}
 	return
 }

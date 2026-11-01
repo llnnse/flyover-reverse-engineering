@@ -149,11 +149,11 @@ func parseMaterial(data []byte, offset *int) []Material {
 			switch textureFormat {
 			case 0:
 				l.Printf("Format: JPEG")
-				materials[processedItems].JPEG = data[textureOffset : textureOffset+textureLength2]
+				materials[processedItems] = Material{Format: TextureJPEG, Image: data[textureOffset : textureOffset+textureLength2]}
 				*offset += 16
 			case 13:
 				l.Printf("Format: HEIC")
-				materials[processedItems].JPEG = data[textureOffset : textureOffset+textureLength2]
+				materials[processedItems] = Material{Format: TextureHEIC, Image: data[textureOffset : textureOffset+textureLength2]}
 				*offset += 16
 			default:
 				panic(fmt.Sprintf("Unsupported textureFormat %d", textureFormat))
@@ -317,8 +317,25 @@ type Header struct {
 	Rotation    [9]float64
 }
 
+// TextureFormat is the encoding of a material's texture image
+type TextureFormat int
+
+const (
+	TextureJPEG TextureFormat = iota // textureFormat 0
+	TextureHEIC                      // textureFormat 13
+)
+
+// Extension returns the file extension for the texture format
+func (f TextureFormat) Extension() string {
+	if f == TextureHEIC {
+		return "heic"
+	}
+	return "jpg"
+}
+
 type Material struct {
-	JPEG []byte
+	Format TextureFormat
+	Image  []byte // encoded texture, as sent by the server
 }
 
 type Mesh struct {

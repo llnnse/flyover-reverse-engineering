@@ -1,6 +1,6 @@
 module github.com/retroplasma/flyover-reverse-engineering
 
-go 1.27.3
+go 1.21
 
 require (
 	github.com/golang/protobuf v1.5.4

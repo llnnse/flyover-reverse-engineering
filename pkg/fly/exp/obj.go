@@ -7,7 +7,6 @@ import (
 	"io/ioutil"
 	"math"
 	"os"
-	"os/exec"
 	"path"
 	"runtime/debug"
 
@@ -16,26 +15,6 @@ import (
 )
 
 var transform = true
-
-func writeTexture(outPath string, data []byte) error {
-	if len(data) > 8 && string(data[4:8]) == "ftyp" {
-		if sipsPath, err := exec.LookPath("sips"); err == nil {
-			tmpFile, err := ioutil.TempFile("", "tex-*.heic")
-			if err == nil {
-				tmpName := tmpFile.Name()
-				defer os.Remove(tmpName)
-				if _, err := tmpFile.Write(data); err == nil {
-					tmpFile.Close()
-					cmd := exec.Command(sipsPath, "-s", "format", "jpeg", tmpName, "--out", outPath)
-					if err := cmd.Run(); err == nil {
-						return nil
-					}
-				}
-			}
-		}
-	}
-	return ioutil.WriteFile(outPath, data, 0655)
-}
 
 type Export interface {
 	Next(c3m c3m.C3M, subPfx string) error
@@ -88,14 +67,16 @@ func (e *OBJExport) Next(c3m c3m.C3M, subPfx string) (err error) {
 	dir, fnPfx := e.dir, e.fnPfx
 
 	for i, material := range c3m.Materials {
-		oth.CheckPanic(writeTexture(path.Join(dir, fmt.Sprintf("%s%s_%d.jpg", fnPfx, subPfx, i)), material.JPEG))
+		// textures are written as received (JPEG or HEIC), without re-encoding
+		texFile := fmt.Sprintf("%s%s_%d.%s", fnPfx, subPfx, i, material.Format.Extension())
+		oth.CheckPanic(ioutil.WriteFile(path.Join(dir, texFile), material.Image, 0644))
 		nxt := fmt.Sprintf(`
 newmtl mtl_%s_%d
 Kd 1.000 1.000 1.000
 d 1.0
 illum 0
-map_Kd %s%s_%d.jpg
-`, subPfx, i, fnPfx, subPfx, i)
+map_Kd %s
+`, subPfx, i, texFile)
 		e.mtlWriter.write(nxt)
 	}
 
