@@ -117,6 +117,14 @@ In Blender (compatible tutorial [here](https://github.com/retroplasma/earth-reve
 <img src="https://user-images.githubusercontent.com/46618410/65068957-fa06b000-d989-11e9-9091-1e71874b0b0c.png" width="300px">
 
 
+###### Fetch Flyover V2 tiles (experimental) [<sup>[code]</sup>](./cmd/fetch-v2/main.go)
+Downloads raw tiles of the newer Flyover V2 styles (98 R3D, 99 DSM, 100 metadata) around a location and saves them unmodified for format analysis. Version and tile ranges come from the resource manifest. The URL scheme (`?style=&v=&x=&y=&z=`) is a guess; use `--query` to try extra parameters. See [FLYOVER_V2_NOTES.md](FLYOVER_V2_NOTES.md).
+```
+go run ./cmd/fetch-v2 [--styles=98,99,100] [--query=k=v] [--version=N] lat lon zoom [radius]
+go run ./cmd/fetch-v2 34.007603 -118.499741 18 1
+```
+Output goes to `./downloaded_files/v2/<style>_<name>/` as `z_x_y.bin`, plus an `index.tsv` with status, content type, size and first bytes of each request (unsigned URLs only).
+
 ###### Authenticate URL [<sup>[code]</sup>](./cmd/auth/main.go)
 This authenticates a URL using parameters from `config.json`:
 ```

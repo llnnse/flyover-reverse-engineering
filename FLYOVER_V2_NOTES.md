@@ -45,7 +45,17 @@ The Maps.app debug menu has a "Flyover Rendering" section containing `Bindless M
 `flyoverBindlessMeshRendering`, `flyoverPbrMeshRendering` and `flyoverPbrSplatRendering`, which
 means VectorKit has a splat renderer for Flyover. It is not confirmed that `R3D` tiles are splats.
 
+## Tooling
+
+- `pkg/mps/v2.go` decodes StyleConfig field 5 (version + tile ranges). Ranges are expressed at
+  their `MinZ` and scale to deeper zooms.
+- `cmd/fetch-v2` downloads raw tiles for styles 98–100 using that version and the existing URL
+  signing, and logs each response's status, content type, size and first 16 bytes to `index.tsv`.
+
 ## Next steps
+
+- Run `cmd/fetch-v2` and inspect the `.bin` files and `index.tsv`. If every request fails, try
+  `--query` variants (e.g. `h=0`, or `region=`/`v=` from the altitude manifest).
 
 - The R3D decoder and the splat renderer live in VectorKit/GeoServices, not in Maps.app. Extract
   them from the macOS 27.2 dyld shared cache, then look for `R3D` parsing and the code behind
